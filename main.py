@@ -9,6 +9,13 @@ from ceviche import fdfd_ez
 from ceviche.modes import insert_mode
 import collections
 from random import randint
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import time
+import torch as t
+from torch.utils.data import DataLoader, TensorDataset, random_split
 
 # Create a container for our slice coords to be used for sources and probes
 # this is going to be super basic, where we take one input and one output to train
@@ -21,9 +28,41 @@ space = 10
 wg_width = 12
 epsr_init = 12
 dev_Nx = dev_Ny = 60
-space_slice = 8
+space_slice = 4
 omega = 2 * np.pi * 200e12
 dl = 40e-9
+
+
+class OutputPredictor(nn.Module):
+    def __init__(self):
+        super(OutputPredictor, self).__init__()
+        self.conv1 = nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
+        self.fc1_2d = nn.linear(32 * 100 * 100, 256)
+
+        self.fc1_1d = nn.linear(20, 256)
+
+        self.fc2 = nn.linear(512, 256)
+        self.fc3 = nn.linear(256, 128)
+        self.fc4 = nn.linear(128, 20)
+
+    def forward(self, x2d, x1d):
+        # Assume x2d is (batch_size, 100, 100) and needs an extra channel dimension
+        x2d = x2d.unsqueeze(1)  # Now x2d is (batch_size, 1, 100, 100)
+        x2d = F.relu(self.conv1(x2d))
+        x2d = F.relu(self.conv2(x2d))
+        x2d = x2d.view(x2d.size(0), -1)  # Flatten
+        x2d = F.relu(self.fc1_2d(x2d))
+
+        # Process the 1D array
+        x1d = F.relu(self.fc1_1d(x1d))
+
+        # Concatenate along the feature dimension
+        x = torch.cat((x2d, x1d), dim=1)
+        x = F.relu(self.fc2(x))
+        x = F.relu(self.fc3(x))
+        x = self.fc4(x)
+        return x
 
 
 def dfs(matrix):
@@ -198,26 +237,72 @@ def generate_new_device():
     simulation = fdfd_ez(omega, dl, epsr, [Npml, Npml])
     Hx, Hy, Ez = simulation.solve(source)
 
+    input = source[input_slice.x, input_slice.y]
+    output = Ez[output_slice.x, output_slice.y]
+
+    return epsr, input, output
+
 
 if __name__ == "__main__":
-    count = 0
-    while True:
-        epsr = np.zeros((Nx, Ny))
-        while not dfs(epsr):
-            epsr, input_slice, output_slice = init_domain(
-                Nx, Ny, Npml, space=space, wg_width=wg_width, space_slice=space_slice
-            )
-        source = insert_mode(omega, dl, input_slice.x, input_slice.y, epsr, m=1)
-        probe = insert_mode(omega, dl, output_slice.x, output_slice.y, epsr, m=2)
-        simulation = fdfd_ez(omega, dl, epsr, [Npml, Npml])
-        Hx, Hy, Ez = simulation.solve(source)
-        print("valid", count)
+    # generating data first
+    epsr_arr = []
+    input_arr = []
+    output_arr = []
+    for i in range(1000):
+        epsr, input, output = generate_new_device()
+        epsr_arr.append(epsr)
+        input_arr.append(input)
+        output_arr.append(output)
+        if i % 10 == 0:
+            print(f"Generated {i} devices")
 
-        count += 1
+    epsrs = t.stack(epsr_arr)
+    inputs = t.stack(input_arr)
+    outputs = t.stack(output_arr)
 
-        # # Setup source
+    # split the data into training and testing
+    dataset = TensorDataset(epsrs, inputs, outputs)
+    train_size = int(0.8 * len(dataset))
+    test_size = len(dataset) - train_size
+    train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
-        # # Setup probe
+    train_loader = DataLoader(train_dataset, batch_size=10, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=10, shuffle=False)
 
-        # # Simulate initial device
-        # simulation, ax = viz_sim(epsr, source, slices=[input_slice,output_slice])
+    # initialize the model
+    model = OutputPredictor()
+    criterion = nn.MSELoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    # hyperparams
+    num_epochs = 10
+
+    # training loop
+    for epoch in range(num_epochs):
+        running_loss = 0
+        for i, data in enumerate(train_loader, 0):
+            epsr, input, output = data
+            optimizer.zero_grad()
+
+            # forward
+            outputs = model(epsr, input)
+            loss = criterion(outputs, output)
+
+            # backprop
+            loss.backward()
+            optimizer.step()
+
+            running_loss += loss.item()
+            if i % 10 == 9:
+                print(f"[{epoch + 1}, {i + 1}] loss: {running_loss / 10}")
+                running_loss = 0
+
+    # test on the test set
+    with t.no_grad():
+        for i, data in enumerate(test_loader, 0):
+            epsr, input, output = data
+            outputs = model(epsr, input)
+            loss = criterion(outputs, output)
+            print(f"Test loss: {loss}")
+
+    t.save(model.state_dict(), "fdtd.pth")
