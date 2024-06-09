@@ -57,6 +57,9 @@ if __name__ == "__main__":
     model.float()
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, "min", patience=3, factor=0.5
+    )
 
     # hyperparams
     num_epochs = 4
