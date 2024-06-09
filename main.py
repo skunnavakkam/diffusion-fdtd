@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader, TensorDataset, random_split
 import pickle
 import os
 from model import OutputPredictor
+import matplotlib.pyplot as plt
 
 
 if __name__ == "__main__":
@@ -58,9 +59,10 @@ if __name__ == "__main__":
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
     # hyperparams
-    num_epochs = 10
+    num_epochs = 4
 
     # training loop
+    loss_arr = []
     for epoch in range(num_epochs):
         running_loss = 0
         for i, data in enumerate(train_loader, 0):
@@ -77,8 +79,16 @@ if __name__ == "__main__":
 
             running_loss += loss.item()
             if i % 10 == 9:
-                print(f"[{epoch + 1}, {i + 1}] loss: {running_loss / 10}")
+                print(f"[{epoch + 1}, {i + 1}] loss: {running_loss}")
+                loss_arr.append(running_loss)
                 running_loss = 0
+
+    plt.plot(loss_arr)
+    plt.autoscale()
+    plt.title("Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.show()
 
     # test on the test set
     with t.no_grad():
