@@ -10,6 +10,18 @@ from model import OutputPredictor
 import matplotlib.pyplot as plt
 
 
+device = None
+if t.backends.mps.is_available():
+    device = t.device("mps")
+    print("Using MPS")
+elif t.cuda.is_available():
+    device = t.device("cuda")
+    print("Using CUDA")
+else:
+    device = t.device("cpu")
+    print("Using CPU")
+
+
 if __name__ == "__main__":
     # check if the data exists
     if not os.path.exists("data_raw.pkl"):
@@ -32,16 +44,16 @@ if __name__ == "__main__":
         with open("data_raw.pkl", "rb") as f:
             epsr_arr, input_arr, output_arr = pickle.load(f)
 
-    epsrs = t.tensor(np.array(epsr_arr)).float()
+    epsrs = t.tensor(np.array(epsr_arr)).float().to(device)
     inputs = t.tensor(np.array(input_arr))
-    inputs_real = inputs.real.clone().detach().float()
-    inputs_imag = inputs.imag.clone().detach().float()
+    inputs_real = inputs.real.clone().detach().float().to(device)
+    inputs_imag = inputs.imag.clone().detach().float().to(device)
     outputs = t.tensor(np.array(output_arr))
     temp = []
     for output in outputs:
-        new = t.cat((output.real, output.imag))
+        new = t.cat((output.real, output.imag)) * 1000
         temp.append(new)
-    outputs = t.stack(temp).float()
+    outputs = t.stack(temp).float().to(device)
 
     # split the data into training and testing
     dataset = TensorDataset(epsrs, inputs_real, inputs_imag, outputs)
@@ -53,16 +65,16 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, batch_size=10, shuffle=False)
 
     # initialize the model
-    model = OutputPredictor().float()
+    model = OutputPredictor().to(device=device).float()
     model.float()
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001)
+    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.00001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, "min", patience=3, factor=0.5
+        optimizer, "min", patience=5, factor=0.5
     )
 
     # hyperparams
-    num_epochs = 4
+    num_epochs = 20
 
     # training loop
     loss_arr = []
@@ -85,9 +97,12 @@ if __name__ == "__main__":
                 print(f"[{epoch + 1}, {i + 1}] loss: {running_loss}")
                 loss_arr.append(running_loss)
                 running_loss = 0
+        scheduler.step(running_loss)
+        print(optimizer.param_groups[0]["lr"])
 
     plt.plot(loss_arr)
     plt.autoscale()
+    plt.yscale("log")
     plt.title("Loss")
     plt.xlabel("Epochs")
     plt.ylabel("Loss")
