@@ -67,14 +67,14 @@ if __name__ == "__main__":
     # initialize the model
     model = OutputPredictor().to(device=device).float()
     model.float()
-    criterion = nn.MSELoss()
+    criterion = nn.SmoothL1Loss()
     optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.00001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, "min", patience=5, factor=0.5
     )
 
     # hyperparams
-    num_epochs = 20
+    num_epochs = 503
 
     # training loop
     loss_arr = []
