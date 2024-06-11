@@ -68,7 +68,7 @@ if __name__ == "__main__":
     # initialize the model
     model = OutputPredictor().to(device=device).float()
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.00001)
+    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.005)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, "min", patience=5, factor=0.5
     )

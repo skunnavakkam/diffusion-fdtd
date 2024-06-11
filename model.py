@@ -32,7 +32,7 @@ class OutputPredictor(nn.Module):
         self.fc1_1d_imag = nn.Linear(20, 128)
 
         self.bn1 = nn.BatchNorm1d(512)
-        # self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(0.25)
 
         self.fc2 = nn.Linear(512, 256)
         self.fc3 = nn.Linear(256, 128)
@@ -52,7 +52,7 @@ class OutputPredictor(nn.Module):
         # Concatenate along the feature dimension
         x = torch.cat((x2d, x1d_real, x1d_imag), dim=1)
         x = self.bn1(x)
-        # x = self.dropout(x)
+        x = self.dropout(x)
         x = F.gelu(self.fc2(x))
         x = F.gelu(self.fc3(x))
         x = self.fc4(x)
