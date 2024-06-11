@@ -8,6 +8,11 @@ import pickle
 import os
 from model import OutputPredictor
 import matplotlib.pyplot as plt
+from numpy.fft import fft
+
+############
+### TODO ###
+############
 
 
 device = None
@@ -42,11 +47,13 @@ if __name__ == "__main__":
             epsr_arr, input_arr, output_arr = pickle.load(f)
 
     epsrs = t.tensor(np.array(epsr_arr)).float().to(device)
-    inputs = t.tensor(np.array(input_arr))
+    inputs = np.array(input_arr)
+    inputs = t.tensor(fft(inputs, axis=1))
     inputs_real = inputs.real.clone().detach().float().to(device)
     inputs_imag = inputs.imag.clone().detach().float().to(device)
 
-    outputs = t.tensor(np.array(output_arr))
+    outputs = np.array(output_arr)
+    outputs = t.tensor(fft(outputs, axis=1))
     outputs = (t.cat((outputs.real, outputs.imag), dim=1) * 1000).float().to(device)
 
     # split the data into training and testing
