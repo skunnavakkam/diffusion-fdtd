@@ -18,14 +18,10 @@ if __name__ == "__main__":
         input_imag = input.imag.clone().detach().float()
         # print(output)
 
-        model.eval()
         with t.no_grad():
-            output_pred = (
-                model(
-                    epsr.unsqueeze(0), input_real.unsqueeze(0), input_imag.unsqueeze(0)
-                )[0]
-                / 1000
-            )
+            output_pred = model(
+                epsr.unsqueeze(0), input_real.unsqueeze(0), input_imag.unsqueeze(0)
+            )[0]
 
         # print(output_pred.shape)
         # print(output_pred_real)

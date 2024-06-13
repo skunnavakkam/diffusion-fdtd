@@ -2,6 +2,8 @@ import torch as t
 from datagen import generate_new_device
 import matplotlib.pyplot as plt
 from model import OutputPredictor
+from main import FOURIER
+from numpy.fft import fft, ifft
 
 if __name__ == "__main__":
     model = OutputPredictor()
@@ -15,7 +17,7 @@ if __name__ == "__main__":
         input = t.tensor(input)
         input_real = input.real.clone().detach().float()
         input_imag = input.imag.clone().detach().float()
-        output *= 1000
+        output *= 1e8
         # print(output)
 
         model.eval()
@@ -28,6 +30,14 @@ if __name__ == "__main__":
         # print(output_pred_real)
         output_pred_real = output_pred[:20]
         output_pred_imag = output_pred[20:]
+
+        if FOURIER:
+            new_output = output_pred_real + 1j * output_pred_imag
+            new_output = ifft(new_output) * 10
+            output_pred_real = new_output.real
+            output_pred_imag = new_output.imag
+
+        print(output_pred)
 
         plt.figure()
         plt.subplot(1, 2, 1)

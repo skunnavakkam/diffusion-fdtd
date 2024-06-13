@@ -8,6 +8,19 @@ import pickle
 import os
 from model import OutputPredictor
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+from numpy.fft import fft
+
+
+FOURIER = True
+hyperparams = {
+    "num_epochs": 100,
+    "batch_size": 64,
+    "learning_rate": 0.01,
+    "weight_decay": 0.001,
+    "patience": 5,
+    "factor": 0.5,
+}
 
 
 device = None
@@ -41,13 +54,24 @@ if __name__ == "__main__":
         with open("data_raw.pkl", "rb") as f:
             epsr_arr, input_arr, output_arr = pickle.load(f)
 
-    epsrs = t.tensor(np.array(epsr_arr)).float().to(device)
-    inputs = t.tensor(np.array(input_arr))
-    inputs_real = inputs.real.clone().detach().float().to(device)
-    inputs_imag = inputs.imag.clone().detach().float().to(device)
+    if FOURIER:
+        epsrs = t.tensor(np.array(epsr_arr)).float().to(device)
+        inputs = np.array(input_arr)
+        inputs = t.tensor(fft(inputs, axis=1))
+        inputs_real = inputs.real.clone().detach().float().to(device)
+        inputs_imag = inputs.imag.clone().detach().float().to(device)
 
-    outputs = t.tensor(np.array(output_arr))
-    outputs = (t.cat((outputs.real, outputs.imag), dim=1) * 1000).float().to(device)
+        outputs = np.array(output_arr)
+        outputs = t.tensor(fft(outputs, axis=1))
+        outputs = (t.cat((outputs.real, outputs.imag), dim=1) * 1e7).float().to(device)
+    else:
+        epsrs = t.tensor(np.array(epsr_arr)).float().to(device)
+        inputs = t.tensor(np.array(input_arr))
+        inputs_real = inputs.real.clone().detach().float().to(device)
+        inputs_imag = inputs.imag.clone().detach().float().to(device)
+
+        outputs = t.tensor(np.array(output_arr))
+        outputs = (t.cat((outputs.real, outputs.imag), dim=1) * 1e8).float().to(device)
 
     # split the data into training and testing
     dataset = TensorDataset(epsrs, inputs_real, inputs_imag, outputs)
@@ -55,58 +79,55 @@ if __name__ == "__main__":
     test_size = len(dataset) - train_size
     train_dataset, test_dataset = random_split(dataset, [train_size, test_size])
 
-    train_loader = DataLoader(train_dataset, batch_size=10, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=10, shuffle=False)
+    train_loader = DataLoader(
+        train_dataset, batch_size=hyperparams["batch_size"], shuffle=True
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=hyperparams["batch_size"], shuffle=False
+    )
 
-    # initialize the model
-    model = OutputPredictor().to(device=device).float()
+    model = OutputPredictor().to(device)
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=0.005)
+    optimizer = optim.Adam(
+        model.parameters(),
+        lr=hyperparams["learning_rate"],
+        weight_decay=hyperparams["weight_decay"],
+    )
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, "min", patience=5, factor=0.5
     )
 
-    # hyperparams
-    num_epochs = 7
-
-    # training loop
+    num_epochs = hyperparams["num_epochs"]
     loss_arr = []
     for epoch in range(num_epochs):
-        running_loss = 0
-        for i, data in enumerate(train_loader, 0):
-            epsr, input_real, input_imag, output = data
-            optimizer.zero_grad()
-
-            # forward
-            outputs = model(epsr, input_real, input_imag)
-            loss = criterion(outputs, output)
-
-            # backprop
-            loss.backward()
-            optimizer.step()
-
-            running_loss += loss.item()
-            if i % 10 == 9:
-                print(f"[{epoch + 1}, {i + 1}] loss: {running_loss}")
-                loss_arr.append(running_loss)
-                running_loss = 0
-        scheduler.step(running_loss)
-        print(optimizer.param_groups[0]["lr"])
+        epoch_loss = 0.0
+        with tqdm(
+            total=len(train_loader), desc=f"Epoch {epoch+1}/{num_epochs}"
+        ) as pbar:
+            for epsr, input_real, input_imag, output in train_loader:
+                optimizer.zero_grad()
+                predictions = model(epsr, input_real, input_imag)
+                loss = criterion(predictions, output)
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
+                pbar.update(1)
+                pbar.set_postfix({"loss": loss.item()})
+        loss_arr.append(epoch_loss / len(train_loader))
+        scheduler.step(epoch_loss)
 
     plt.plot(loss_arr)
-    plt.autoscale()
-    plt.yscale("log")
-    plt.title("Loss")
-    plt.xlabel("Epochs")
+    plt.xlabel("Epoch")
     plt.ylabel("Loss")
+    plt.title("Training Loss Over Epochs")
     plt.show()
 
-    # test on the test set
     with t.no_grad():
-        for i, data in enumerate(test_loader, 0):
-            epsr, input_real, input_imag, output = data
-            outputs = model(epsr, input_real, input_imag)
-            loss = criterion(outputs, output)
-            print(f"Test loss: {loss}")
+        total_loss = 0.0
+        for epsr, input_real, input_imag, output in tqdm(test_loader, desc="Testing"):
+            predictions = model(epsr, input_real, input_imag)
+            loss = criterion(predictions, output)
+            total_loss += loss.item()
+        print(f"Average Test Loss: {total_loss / len(test_loader):.4f}")
 
     t.save(model.state_dict(), "fdtd.pth")
